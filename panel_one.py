@@ -8,6 +8,12 @@ import wx.lib.agw.aui as aui
 import wx.lib.scrolledpanel as scrolled
 from pubsub import pub
 
+from dump_json import JsonData
+
+
+ai_model_dimension = (416, 416)
+roi_limit = 4
+
 
 class PanelOne(wx.Panel):
     def __init__(self, parent, screenSize, menu_bar, *args, **kwargs):
@@ -16,12 +22,16 @@ class PanelOne(wx.Panel):
         self.menu_bar = menu_bar
         self.size = wx.Size(self.width*(0.8), self.height*(0.6)) # For video_panel
         
+        self.config = args[0]
+        
         self.cwd = os.getcwd()
         self.video_path = "None.mp4" # Non-existent initial files
         self.init_flag = 0
         self.frame_count = 0
         
-        self.config = args[0]
+        # draw on opencv
+        self.draw_flag = 0
+        self.points_list = []
         
         # set font
         font = self.GetFont()
@@ -53,15 +63,43 @@ class PanelOne(wx.Panel):
         
         # put the button
         item_vbox = wx.BoxSizer(wx.VERTICAL)
+        roi_hbox = wx.BoxSizer(wx.HORIZONTAL)
+        ai_hbox = wx.BoxSizer(wx.HORIZONTAL)
+        item_vbox_2 = wx.BoxSizer(wx.VERTICAL)
 
         # define the buttons
         self.btn_load = wx.Button(self.scrolled_panel, label="Load video", size=(-1, 30))
         self.btn_load.Bind(wx.EVT_BUTTON, self.OnLoadFile)
         self.btn_load.Enable()
         
+        # define the ROI choice box
+        roi_text = wx.StaticText(self.scrolled_panel, label="ROI level: ", size=(-1, 30))
+        roi_list = ["ROI1", "ROI2"]
+        self.roi_choice = wx.Choice(self.scrolled_panel, -1, choices = roi_list, style = wx.CB_SORT)
+        self.roi_choice.Disable()
+        
+        # define the AI choice box
+        ai_text = wx.StaticText(self.scrolled_panel, label="AI model: ", size=(-1, 30))
+        ai_list = ["BSD", "BSIS", "FCW"]
+        self.ai_choice = wx.Choice(self.scrolled_panel, -1, choices = ai_list, style = wx.CB_SORT)
+        self.ai_choice.Disable()
+        
+        # define the buttons
+        self.btn_json = wx.Button(self.scrolled_panel, label="Dump json", size=(-1, 30))
+        self.btn_json.Disable()
+        
         # put to boxes
-        item_vbox.Add(self.btn_load, 0, wx.ALL, 10)
+        item_vbox.Add(self.btn_load, 0, wx.ALL, 10) # Load video
+        roi_hbox.Add(roi_text, 0, wx.ALL, 10) # ROI level
+        roi_hbox.Add(self.roi_choice, 0, wx.ALL, 10)
+        ai_hbox.Add(ai_text, 0, wx.ALL, 10) # AI model
+        ai_hbox.Add(self.ai_choice, 0, wx.ALL, 10)
+        item_vbox_2.Add(self.btn_json, 0, wx.ALL, 10) # Dump json
+        
         button_vbox.Add(item_vbox, 0, wx.ALL, 10)
+        button_vbox.Add(roi_hbox, 0, wx.ALL, 10)
+        button_vbox.Add(ai_hbox, 0, wx.ALL, 10)
+        button_vbox.Add(item_vbox_2, 0, wx.ALL, 10)
         
         self.scrolled_panel.SetSizer(button_vbox)
         
@@ -76,8 +114,12 @@ class PanelOne(wx.Panel):
         
         # put an initial image
         self.img = wx.Image("icon/init.png", wx.BITMAP_TYPE_ANY)
-        self.img = self.img.Scale(self.size[0], self.size[1])
-        self.img = wx.StaticBitmap(self.video_panel, -1, wx.BitmapFromImage(self.img))
+        self.img = self.img.Scale(self.client_size[0], self.client_size[1])
+        """ 
+        wxPyDeprecationWarning: Call to deprecated item BitmapFromImage. Use :class:`wx.Bitmap` instead 
+        """
+        # self.img = wx.StaticBitmap(self.video_panel, -1, wx.BitmapFromImage(self.img))
+        self.img = wx.StaticBitmap(self.video_panel, -1, wx.Bitmap(self.img))
         
         video_hbox.Add(self.video_panel, 0, wx.ALL, 10)
         
@@ -97,13 +139,13 @@ class PanelOne(wx.Panel):
         video_button_hbox.Add(self.btn_pause, 0, wx.ALL, 10)
         video_button_hbox.Add(self.btn_stop, 0, wx.ALL, 10)
         
-        # # Create slider
-        # self.slider = wx.Slider(self, id=-1, value=0, minValue=0, maxValue=10)
-        # self.slider.SetMinSize((100, -1))
-        # self.slider.Disable()
+        # Create slider
+        self.slider = wx.Slider(self, id=-1, value=0, minValue=0, maxValue=100)
+        self.slider.SetMinSize((100, -1))
+        self.slider.Disable()
         
         video_vbox.Add(video_hbox, 1, wx.EXPAND)
-        # video_vbox.Add(self.slider, 1, wx.EXPAND)
+        video_vbox.Add(self.slider, 1, wx.EXPAND)
         video_vbox.AddSpacer(1)
         video_vbox.Add(video_button_hbox, 1, wx.EXPAND)
         
@@ -126,7 +168,16 @@ class PanelOne(wx.Panel):
         self.btn_stop.Enable()
         
         # self.slider.Bind(wx.EVT_SLIDER, self.OnSeek)
-        # self.slider.Enable()
+        self.slider.SetValue(0)
+        # self.slider.Disable()
+        
+        self.roi_choice.Bind(wx.EVT_CHOICE, self.onRoiChoice)
+        self.roi_choice.Enable()
+        
+        self.ai_choice.Bind(wx.EVT_CHOICE, self.onAiChoice)
+        self.ai_choice.Enable()
+        
+        self.btn_json.Bind(wx.EVT_BUTTON, self.OnDumpJson)
         
         self.cv2wx_interface()
                 
@@ -134,9 +185,9 @@ class PanelOne(wx.Panel):
         # ---------- opencv to wxpython interface ---------- #
         # opencv information
         self.capture = cv2.VideoCapture(self.video_path)
-        ret, frame = self.capture.read()
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        height, width = frame.shape[:2]
+        ret, self.frame = self.capture.read()
+        self.frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
+        #height, width = self.frame.shape[:2]
         #print(height, width)
         self.fps = self.capture.get(cv2.CAP_PROP_FPS)
         #print(self.fps)
@@ -148,17 +199,14 @@ class PanelOne(wx.Panel):
             sys.exit(999)
             
         # resize the frame
-        frame = self.rescaleFrame(frame)
+        self.frame = self.rescaleFrame(self.frame)
         # draw on frame
-        self.cv_draw(frame)
+        if self.draw_flag:
+            self.cv_draw(self.frame)
         
         # create a wx bitmap
-        self.bmp = wx.Bitmap.FromBuffer(self.size[0], self.size[1], frame)
+        self.bmp = wx.Bitmap.FromBuffer(self.client_size[0], self.client_size[1], self.frame)
         self.bitmap = wx.StaticBitmap(self.video_panel, bitmap=self.bmp)
-        
-        # avoid flicker
-        self.video_panel.Bind(wx.EVT_PAINT, self.OnPaint)
-        self.video_panel.Bind(wx.EVT_ERASE_BACKGROUND, self.OnEraseBackground)
         
         # set a timer to handle this event
         self.timer = wx.Timer(self)
@@ -166,9 +214,17 @@ class PanelOne(wx.Panel):
         self.timer.Stop()
         self.Bind(wx.EVT_TIMER, self.nextFrame)
         
+        # avoid flicker (Note! Do not refresh the panel, refresh the bitmap !)
+        #self.video_panel.SetBackgroundStyle(wx.BG_STYLE_PAINT)
+        self.bitmap.Bind(wx.EVT_PAINT, self.OnPaint)
+        #self.video_panel.Bind(wx.EVT_ERASE_BACKGROUND, self.OnEraseBackground)
+        
         # bind to mouse clicked event
         #print(self.video_panel.GetChildren())
-        self.video_panel.GetChildren()[0].Bind(wx.EVT_LEFT_DOWN, lambda event: self.OnMouseClicked(frame, event))
+        self.video_panel.GetChildren()[0].Bind(wx.EVT_LEFT_DOWN, lambda event: self.OnMouseClicked(self.frame, event))
+        
+        # avoid layout changes after zooming
+        self.Bind(wx.EVT_SIZE, self.OnSize)
         
     # ---------- Event處理 Start ---------- #
     def OnLoadFile(self, event=None):
@@ -188,6 +244,11 @@ class PanelOne(wx.Panel):
 
                 self.init_flag = 1
              
+            self.frame_count = 0
+            self.draw_flag = 0
+            self.points_list = []
+            
+            # reload video
             self.video_panel_refresh()
         
         dialog.Destroy()
@@ -208,6 +269,8 @@ class PanelOne(wx.Panel):
 
     def OnStop(self, event=None):
         self.frame_count = 0 # reset the frame count
+        self.draw_flag = 0
+        self.points_list = []
         
         # reload video
         self.video_panel_refresh()
@@ -216,18 +279,71 @@ class PanelOne(wx.Panel):
         self.btn_pause.Enable()
         self.btn_stop.Enable()
         
-    def OnSeek(self, event=None):
-        pass
+    # def OnSeek(self, event=None):
+        # pass
         
     def OnPaint(self, event=None):
-        dc = wx.BufferedPaintDC(self.video_panel)
-        dc.DrawBitmap(self.bmp, 0, 0)
+        try:
+            dc = wx.BufferedPaintDC(self.bitmap)
+            dc.DrawBitmap(self.bmp, 0, 0)
+            
+            event.Skip()
+        except Exception as e:
+            pass
         
     def OnEraseBackground(self, event=None):
-        pass
+        event.Skip()
+        
+    def OnSize(self, event=None):
+        #print("zooming ...")
+        self.Refresh()
         
     def OnMouseClicked(self, frame, event=None):
-        print(event.Position)
+        #print(event.Position) # data type: wx.Point(X, Y)
+        if len(self.points_list) < roi_limit:
+            # print("Limit the number of points successfully !")
+            self.draw_flag = 1
+            self.points_list.append(tuple(event.Position))
+            
+            self.cv_draw(frame)
+            self.video_panel.Refresh()
+            
+            self.dump_json_conditions()
+        
+    def onRoiChoice(self, event=None):
+        self.roi_result = self.roi_choice.GetStringSelection()
+        # print(self.roi_result)
+        
+        self.dump_json_conditions()
+        
+    def onAiChoice(self, event=None):
+        self.ai_result = self.ai_choice.GetStringSelection()
+        # print(self.ai_result)
+        
+        self.dump_json_conditions()
+        
+    def OnDumpJson(self, event=None):
+        #print("Dump json ...")
+        #print(self.points_list)
+        ai_points_list = self.to_AI_model_position()
+        #print(ai_points_list)
+        # print(self.ai_result)
+        # print(self.roi_result)
+        
+        json_key = "%s_%s"%(self.ai_result, self.roi_result)
+        #print(json_key.lower())
+        jsonData = JsonData(json_key.lower(), ai_points_list)
+        jsonData.json_load()
+        jsonData.json_data_process()
+        jsonData.json_dump()
+        
+        new_file_exist = jsonData.check_new_json_file()
+        if new_file_exist:
+            msg = "json dump successfully"
+        else:
+            msg = "json dump failed"
+            
+        self.showDialog(msg)
         
     # ---------- Event處理 End ---------- # 
     
@@ -246,32 +362,38 @@ class PanelOne(wx.Panel):
         
     # ---------- opencv to wxpython interface ---------- #
     def nextFrame(self, event=None):
-        ret, frame = self.capture.read()
+        # ---------- video part ---------- #
+        ret, self.frame = self.capture.read()
         self.frame_count += 1
-        #print(self.frame_count)
+        # print(self.frame_count)
         
-        if (self.frame_count == self.total_frame):
-            self.OnStop()
+        # if (self.frame_count == self.total_frame):
+            # self.OnStop()
         
         if ret:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            self.frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
             # resize the frame
-            frame = self.rescaleFrame(frame)
+            self.frame = self.rescaleFrame(self.frame)
             # draw on frame
-            self.cv_draw(frame)
+            if self.draw_flag:
+                self.cv_draw(self.frame)
             
-            self.bmp.CopyFromBuffer(frame)
+            self.bmp.CopyFromBuffer(self.frame)
             
             self.video_panel.Refresh()
+            
+        # ---------- slider part ---------- #
+        offset = self.frame_count*100//self.total_frame
+        self.slider.SetValue(offset)
             
     def rescaleFrame(self, frame):
         """ Rescale Images, Videos and Live Video """
         height, width = frame.shape[:2]
-        dimensions = (self.size[0], self.size[1])
+        dimensions = (self.client_size[0], self.client_size[1])
         
-        if (height == self.size[1]) and (width == self.size[0]):
+        if (height == self.client_size[1]) and (width == self.client_size[0]):
             return frame
-        elif (height > self.size[1]) or (width > self.size[0]):
+        elif (height > self.client_size[1]) or (width > self.client_size[0]):
             method = cv2.INTER_AREA   
         else:
             method = cv2.INTER_CUBIC
@@ -284,5 +406,72 @@ class PanelOne(wx.Panel):
         self.video_panel = wx.Panel(self, wx.ID_ANY, size=self.size, style=wx.BORDER_THEME)
         self.create_video_panel()
         
+        self.btn_json.Disable()
+        
     def cv_draw(self, frame): # already BGR -> RGB
-        cv2.line(frame, (0, 0), (self.size[0], self.size[1]), (255, 0, 0), 2)
+        # draw point
+        for point in self.points_list:
+            cv2.circle(frame, tuple(point), 1, (255, 0, 0), 5)
+            
+        # draw line 
+        for i in range(len(self.points_list)):
+            #print(i, self.points_list)
+            if i > 0:
+                cv2.line(frame, tuple(self.points_list[i-1]), tuple(self.points_list[i]), (255, 0, 0), 2)
+                
+            if i == roi_limit-1:
+                cv2.line(frame, tuple(self.points_list[i]), tuple(self.points_list[0]), (255, 0, 0), 2)
+                
+        self.bmp.CopyFromBuffer(frame)
+        self.video_panel.Refresh()
+        
+    # ---------- dump json conditions ---------- #        
+    def dump_json_conditions(self):
+        try:
+            if self.roi_result and self.ai_result and len(self.points_list) == roi_limit:
+                self.btn_json.Enable()
+                
+        except AttributeError as e:
+            #print("AttributeError !")
+            self.btn_json.Disable()
+            
+    def to_AI_model_position(self):
+        ai_points_list = []
+    
+        for i in range(len(self.points_list)):
+            #print(self.points_list[i]) # GUI video coordinate (self.client_size)
+            ai_x = int(self.points_list[i][0]*ai_model_dimension[0]/self.client_size[0])
+            ai_y = int(self.points_list[i][1]*ai_model_dimension[1]/self.client_size[1])
+            
+            ai_points_list.append((ai_x, ai_y))
+            
+        #print(ai_points_list)
+        return ai_points_list
+        
+        
+    # ---------- show dialog ---------- #  
+    def showDialog(self, msg, dlg_type="OK"):
+        retCode = None
+
+        if dlg_type == "OK":
+            dlg = wx.MessageDialog(parent=None, message=msg,
+                caption="Note",
+                style = wx.OK|wx.ICON_WARNING|wx.STAY_ON_TOP)
+                
+            retCode = dlg.ShowModal()
+            
+            # release dialog
+            dlg.Destroy()
+            
+        elif dlg_type == "YES_NO":
+            dlg = wx.MessageDialog(parent=None, message=msg,
+                caption="Question",
+                style = wx.YES_NO|wx.ICON_QUESTION|wx.STAY_ON_TOP)
+            
+            retCode = dlg.ShowModal()
+            
+            # release dialog
+            dlg.Destroy()
+            
+        return retCode
+    

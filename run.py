@@ -165,8 +165,8 @@ def create_output_folders(paths):
         
         
 def main():    
-    # create output folder
-    create_output_folders(["output"])
+    # # create output folder
+    # create_output_folders(["output"])
     
     # init settings
     tool_title = "Coordinate Transfer Tool"
