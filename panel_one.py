@@ -11,10 +11,6 @@ from pubsub import pub
 from dump_json import JsonData
 
 
-ai_model_dimension = (416, 416)
-roi_limit = 4
-
-
 class PanelOne(wx.Panel):
     def __init__(self, parent, screenSize, menu_bar, *args, **kwargs):
         super(PanelOne, self).__init__(parent=parent)
@@ -23,6 +19,12 @@ class PanelOne(wx.Panel):
         self.size = wx.Size(self.width*(0.8), self.height*(0.6)) # For video_panel
         
         self.config = args[0]
+        ai_model_width = int(self.config.get_config_item("COMMON_SETTINGS", "ai_model_width"))
+        ai_model_height = int(self.config.get_config_item("COMMON_SETTINGS", "ai_model_height"))
+        self.ai_model_dimension = (ai_model_width, ai_model_height)
+        #print(self.ai_model_dimension)
+        self.roi_limit = int(self.config.get_config_item("COMMON_SETTINGS", "roi_limit"))
+        #print(self.roi_limit)
         
         self.cwd = os.getcwd()
         self.video_path = "None.mp4" # Non-existent initial files
@@ -80,7 +82,7 @@ class PanelOne(wx.Panel):
         
         # define the AI choice box
         ai_text = wx.StaticText(self.scrolled_panel, label="AI model: ", size=(-1, 30))
-        ai_list = ["BSD", "BSIS", "FCW"]
+        ai_list = ["BSD", "BSIS", "BSD_BSIS","FCW"]
         self.ai_choice = wx.Choice(self.scrolled_panel, -1, choices = ai_list, style = wx.CB_SORT)
         self.ai_choice.Disable()
         
@@ -186,6 +188,7 @@ class PanelOne(wx.Panel):
         # opencv information
         self.capture = cv2.VideoCapture(self.video_path)
         ret, self.frame = self.capture.read()
+        self.frame_count += 1
         self.frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
         #height, width = self.frame.shape[:2]
         #print(height, width)
@@ -300,7 +303,7 @@ class PanelOne(wx.Panel):
         
     def OnMouseClicked(self, frame, event=None):
         #print(event.Position) # data type: wx.Point(X, Y)
-        if len(self.points_list) < roi_limit:
+        if len(self.points_list) < self.roi_limit:
             # print("Limit the number of points successfully !")
             self.draw_flag = 1
             self.points_list.append(tuple(event.Position))
@@ -332,18 +335,27 @@ class PanelOne(wx.Panel):
         
         json_key = "%s_%s"%(self.ai_result, self.roi_result)
         #print(json_key.lower())
-        jsonData = JsonData(json_key.lower(), ai_points_list)
-        jsonData.json_load()
-        jsonData.json_data_process()
-        jsonData.json_dump()
         
-        new_file_exist = jsonData.check_new_json_file()
-        if new_file_exist:
-            msg = "json dump successfully"
-        else:
-            msg = "json dump failed"
+        # check json file exist
+        json_data_path = "data/event_fusion.json"
+        #print(os.path.abspath(json_data_path))
+        
+        if not os.path.isfile(json_data_path):
+            self.showDialog("%s is not exist!\n Please check again..."%(os.path.abspath(json_data_path)))
             
-        self.showDialog(msg)
+        else:
+            jsonData = JsonData(json_data_path, json_key.lower(), ai_points_list)
+            jsonData.json_load()
+            jsonData.json_data_process()
+            jsonData.json_dump()
+            
+            file_update = jsonData.check_json_file_update()
+            if file_update:
+                msg = "json dump successfully!"
+            else:
+                msg = "json dump failed! Please try again..."
+                
+            self.showDialog(msg)
         
     # ---------- Event處理 End ---------- # 
     
@@ -365,11 +377,12 @@ class PanelOne(wx.Panel):
         # ---------- video part ---------- #
         ret, self.frame = self.capture.read()
         self.frame_count += 1
-        # print(self.frame_count)
+        #print(self.frame_count, self.total_frame)
         
-        # if (self.frame_count == self.total_frame):
-            # self.OnStop()
-        
+        if (self.frame_count == self.total_frame):
+            #self.OnStop()
+            self.timer.Stop()
+            
         if ret:
             self.frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
             # resize the frame
@@ -419,7 +432,7 @@ class PanelOne(wx.Panel):
             if i > 0:
                 cv2.line(frame, tuple(self.points_list[i-1]), tuple(self.points_list[i]), (255, 0, 0), 2)
                 
-            if i == roi_limit-1:
+            if i == self.roi_limit-1:
                 cv2.line(frame, tuple(self.points_list[i]), tuple(self.points_list[0]), (255, 0, 0), 2)
                 
         self.bmp.CopyFromBuffer(frame)
@@ -428,7 +441,7 @@ class PanelOne(wx.Panel):
     # ---------- dump json conditions ---------- #        
     def dump_json_conditions(self):
         try:
-            if self.roi_result and self.ai_result and len(self.points_list) == roi_limit:
+            if self.roi_result and self.ai_result and len(self.points_list) == self.roi_limit:
                 self.btn_json.Enable()
                 
         except AttributeError as e:
@@ -440,8 +453,8 @@ class PanelOne(wx.Panel):
     
         for i in range(len(self.points_list)):
             #print(self.points_list[i]) # GUI video coordinate (self.client_size)
-            ai_x = int(self.points_list[i][0]*ai_model_dimension[0]/self.client_size[0])
-            ai_y = int(self.points_list[i][1]*ai_model_dimension[1]/self.client_size[1])
+            ai_x = int(self.points_list[i][0]*self.ai_model_dimension[0]/self.client_size[0])
+            ai_y = int(self.points_list[i][1]*self.ai_model_dimension[1]/self.client_size[1])
             
             ai_points_list.append((ai_x, ai_y))
             

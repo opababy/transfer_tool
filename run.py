@@ -31,6 +31,12 @@ class TaskConfig():
         else:
             self.config.read(self.config_file, encoding="utf-8")
             
+    def get_config_item(self, category, item):
+        return self.config.get(category, item).strip()
+        
+    def get_criteria_item(self, category, item):
+        return self.criteria.get(category, item).strip()
+        
         
 class TaskFrame(wx.Frame):
     """ 
@@ -77,7 +83,7 @@ class TaskFrame(wx.Frame):
         self.notebook.Bind(aui.EVT_AUINOTEBOOK_PAGE_CHANGED, self.PageChanged)
         
         self.page1 = PanelOne(self.notebook, self.screenSize, self.menu_bar, self.config)
-        self.notebook.AddPage(self.page1, "Video")
+        self.notebook.AddPage(self.page1, "Calibration")
         
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self.notebook, border=5, proportion=1, flag=wx.ALL|wx.EXPAND)
@@ -121,11 +127,11 @@ class TaskFrame(wx.Frame):
         self.notebook.Unbind(aui.EVT_AUINOTEBOOK_PAGE_CHANGED) # because the page has not been created yet
         
         # destory pages
-        self.delNotebookPage("Video")
+        self.delNotebookPage("Calibration")
 
         # create new pages        
         self.page1 = PanelOne(self.notebook, self.screenSize, self.menu_bar, self.config)
-        self.notebook.AddPage(self.page1, "Video")
+        self.notebook.AddPage(self.page1, "Calibration")
         
         self.notebook.Bind(aui.EVT_AUINOTEBOOK_PAGE_CHANGED, self.PageChanged)
 
@@ -170,7 +176,7 @@ def main():
     
     # init settings
     tool_title = "Coordinate Transfer Tool"
-    tool_version = "v1.0.0"
+    tool_version = "v1.1.0"
     tool_icon = "icon/logo.png"
     
     # create application
