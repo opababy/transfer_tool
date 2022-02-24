@@ -28,6 +28,7 @@ class PanelOne(wx.Panel):
         
         self.cwd = os.getcwd()
         self.video_path = "None.mp4" # Non-existent initial files
+        self.image_path = "None.jpg" # Non-existent initial files
         self.init_flag = 0
         self.frame_count = 0
         
@@ -70,9 +71,13 @@ class PanelOne(wx.Panel):
         item_vbox_2 = wx.BoxSizer(wx.VERTICAL)
 
         # define the buttons
-        self.btn_load = wx.Button(self.scrolled_panel, label="Load video", size=(-1, 30))
-        self.btn_load.Bind(wx.EVT_BUTTON, self.OnLoadFile)
-        self.btn_load.Enable()
+        self.btn_video_load = wx.Button(self.scrolled_panel, label="Load video", size=(-1, 30))
+        self.btn_video_load.Bind(wx.EVT_BUTTON, self.OnLoadVideoFile)
+        self.btn_video_load.Enable()
+        
+        self.btn_image_load = wx.Button(self.scrolled_panel, label="Load image", size=(-1, 30))
+        self.btn_image_load.Bind(wx.EVT_BUTTON, self.OnLoadImageFile)
+        self.btn_image_load.Enable()
         
         # define the ROI choice box
         roi_text = wx.StaticText(self.scrolled_panel, label="ROI level: ", size=(-1, 30))
@@ -82,7 +87,7 @@ class PanelOne(wx.Panel):
         
         # define the AI choice box
         ai_text = wx.StaticText(self.scrolled_panel, label="AI model: ", size=(-1, 30))
-        ai_list = ["BSD", "BSIS", "BSD_BSIS","FCW"]
+        ai_list = ["BSD", "BSIS", "BSD_BSIS", "FCW"]
         self.ai_choice = wx.Choice(self.scrolled_panel, -1, choices = ai_list, style = wx.CB_SORT)
         self.ai_choice.Disable()
         
@@ -91,7 +96,8 @@ class PanelOne(wx.Panel):
         self.btn_json.Disable()
         
         # put to boxes
-        item_vbox.Add(self.btn_load, 0, wx.ALL, 10) # Load video
+        item_vbox.Add(self.btn_video_load, 0, wx.ALL, 10) # Load video
+        item_vbox.Add(self.btn_image_load, 0, wx.ALL, 10) # Load image
         roi_hbox.Add(roi_text, 0, wx.ALL, 10) # ROI level
         roi_hbox.Add(self.roi_choice, 0, wx.ALL, 10)
         ai_hbox.Add(ai_text, 0, wx.ALL, 10) # AI model
@@ -181,9 +187,25 @@ class PanelOne(wx.Panel):
         
         self.btn_json.Bind(wx.EVT_BUTTON, self.OnDumpJson)
         
-        self.cv2wx_interface()
+        self.cvVideo2wx_interface()
+        
+    def create_image_panel(self): # after trigger "Load image" btn
+        # bind events
+        self.btn_play.Disable()
+        self.btn_pause.Disable()
+        self.btn_stop.Disable()
+        
+        self.roi_choice.Bind(wx.EVT_CHOICE, self.onRoiChoice)
+        self.roi_choice.Enable()
+        
+        self.ai_choice.Bind(wx.EVT_CHOICE, self.onAiChoice)
+        self.ai_choice.Enable()
+        
+        self.btn_json.Bind(wx.EVT_BUTTON, self.OnDumpJson)
+        
+        self.cvImg2wx_interface()
                 
-    def cv2wx_interface(self):
+    def cvVideo2wx_interface(self):
         # ---------- opencv to wxpython interface ---------- #
         # opencv information
         self.capture = cv2.VideoCapture(self.video_path)
@@ -229,8 +251,33 @@ class PanelOne(wx.Panel):
         # avoid layout changes after zooming
         self.Bind(wx.EVT_SIZE, self.OnSize)
         
+    def cvImg2wx_interface(self):
+        # ---------- opencv to wxpython interface ---------- #
+        # opencv information
+        self.cvImg = cv2.imread(self.image_path)
+        self.cvImg = cv2.cvtColor(self.cvImg, cv2.COLOR_BGR2RGB)
+        
+        # resize the Img
+        self.cvImg = self.rescaleFrame(self.cvImg)
+        # draw on Img
+        if self.draw_flag:
+            self.cv_draw(self.cvImg)
+            
+        # create a wx bitmap
+        self.bmp = wx.Bitmap.FromBuffer(self.client_size[0], self.client_size[1], self.cvImg)
+        self.bitmap = wx.StaticBitmap(self.video_panel, bitmap=self.bmp)
+        
+        # avoid flicker (Note! Do not refresh the panel, refresh the bitmap !)
+        self.bitmap.Bind(wx.EVT_PAINT, self.OnPaint)
+        
+        # bind to mouse clicked event
+        self.video_panel.GetChildren()[0].Bind(wx.EVT_LEFT_DOWN, lambda event: self.OnMouseClicked(self.cvImg, event))
+        
+        # avoid layout changes after zooming
+        self.Bind(wx.EVT_SIZE, self.OnSize)
+        
     # ---------- Event處理 Start ---------- #
-    def OnLoadFile(self, event=None):
+    def OnLoadVideoFile(self, event=None):
         wildcard = "Video (*.mp4; *.mov)|*.mp4; *.mov"
         cwd = r""+self.cwd+"/videos/"
         #print(cwd)
@@ -356,6 +403,30 @@ class PanelOne(wx.Panel):
                 msg = "json dump failed! Please try again..."
                 
             self.showDialog(msg)
+            
+    def OnLoadImageFile(self, event=None):
+        wildcard = "Image (*.jpg; *.png)|*.jpg; *.png"
+        cwd = r""+self.cwd+"/images/"
+        dialog = wx.FileDialog(None, "Select Image", cwd, "", wildcard, wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
+        if dialog.ShowModal() == wx.ID_OK:
+            self.image_path = dialog.GetPath()    
+            
+            # First trigger event !
+            if not self.init_flag:
+                # delete image
+                self.img.Destroy()
+                del self.img
+
+                self.init_flag = 1
+             
+            self.frame_count = 0
+            self.draw_flag = 0
+            self.points_list = []
+            
+            # reload image
+            self.image_panel_refresh()
+        
+        dialog.Destroy()
         
     # ---------- Event處理 End ---------- # 
     
@@ -421,19 +492,41 @@ class PanelOne(wx.Panel):
         
         self.btn_json.Disable()
         
+    def image_panel_refresh(self):
+        self.video_panel.Destroy()
+        self.video_panel = wx.Panel(self, wx.ID_ANY, size=self.size, style=wx.BORDER_THEME)
+        self.create_image_panel()
+        
+        self.btn_json.Disable()
+        
     def cv_draw(self, frame): # already BGR -> RGB
+        color_table = self.config.get_config_item("COMMON_SETTINGS", "color_table")
+        # (R, G, B)
+        if color_table == "0":
+            color = (0, 0, 0)
+        elif color_table == "1":
+            color = (255, 255, 255)
+        elif color_table == "2":
+            color = (255, 0, 0)
+        elif color_table == "3":
+            color = (0, 255, 0)
+        elif color_table == "4":
+            color = (0, 0, 255)
+        else:
+            color = (255, 255, 255)
+            
         # draw point
         for point in self.points_list:
-            cv2.circle(frame, tuple(point), 1, (255, 0, 0), 5)
+            cv2.circle(frame, tuple(point), 1, color, 5)
             
         # draw line 
         for i in range(len(self.points_list)):
             #print(i, self.points_list)
             if i > 0:
-                cv2.line(frame, tuple(self.points_list[i-1]), tuple(self.points_list[i]), (255, 0, 0), 2)
+                cv2.line(frame, tuple(self.points_list[i-1]), tuple(self.points_list[i]), color, 2)
                 
             if i == self.roi_limit-1:
-                cv2.line(frame, tuple(self.points_list[i]), tuple(self.points_list[0]), (255, 0, 0), 2)
+                cv2.line(frame, tuple(self.points_list[i]), tuple(self.points_list[0]), color, 2)
                 
         self.bmp.CopyFromBuffer(frame)
         self.video_panel.Refresh()
