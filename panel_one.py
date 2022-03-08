@@ -7,6 +7,7 @@ import wx.media
 import wx.lib.agw.aui as aui
 import wx.lib.scrolledpanel as scrolled
 from pubsub import pub
+import platform
 
 from dump_json import JsonData
 
@@ -246,7 +247,7 @@ class PanelOne(wx.Panel):
         
         # bind to mouse clicked event
         #print(self.video_panel.GetChildren())
-        self.video_panel.GetChildren()[0].Bind(wx.EVT_LEFT_DOWN, lambda event: self.OnMouseClicked(self.frame, event))
+        self.bitmap.Bind(wx.EVT_LEFT_DOWN, lambda event: self.OnMouseClicked(self.frame, event))
         
         # avoid layout changes after zooming
         self.Bind(wx.EVT_SIZE, self.OnSize)
@@ -271,14 +272,18 @@ class PanelOne(wx.Panel):
         self.bitmap.Bind(wx.EVT_PAINT, self.OnPaint)
         
         # bind to mouse clicked event
-        self.video_panel.GetChildren()[0].Bind(wx.EVT_LEFT_DOWN, lambda event: self.OnMouseClicked(self.cvImg, event))
+        self.bitmap.Bind(wx.EVT_LEFT_DOWN, lambda event: self.OnMouseClicked(self.cvImg, event))
         
         # avoid layout changes after zooming
         self.Bind(wx.EVT_SIZE, self.OnSize)
         
-    # ---------- Event處理 Start ---------- #
+    # ---------- Event Handler Start ---------- #
     def OnLoadVideoFile(self, event=None):
-        wildcard = "Video (*.mp4; *.mov)|*.mp4; *.mov"
+        if platform.system() == "Windows":
+            wildcard = "Video (*.mp4; *.mov)|*.mp4; *.mov"
+        # Linux have some bugs... cannot show multiple wildcard
+        elif platform.system() == "Linux":
+            wildcard = "Video (*.mp4)|*.mp4"
         cwd = r""+self.cwd+"/videos/"
         #print(cwd)
         dialog = wx.FileDialog(None, "Select Video", cwd, "", wildcard, wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
@@ -405,7 +410,11 @@ class PanelOne(wx.Panel):
             self.showDialog(msg)
             
     def OnLoadImageFile(self, event=None):
-        wildcard = "Image (*.jpg; *.png)|*.jpg; *.png"
+        if platform.system() == "Windows":
+            wildcard = "Image (*.jpg; *.png)|*.jpg; *.png"
+        # Linux have some bugs... cannot show multiple wildcard
+        elif platform.system() == "Linux":
+            wildcard = "Image (*.png)|*.png"
         cwd = r""+self.cwd+"/images/"
         dialog = wx.FileDialog(None, "Select Image", cwd, "", wildcard, wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
         if dialog.ShowModal() == wx.ID_OK:
@@ -424,11 +433,17 @@ class PanelOne(wx.Panel):
             self.points_list = []
             
             # reload image
+            # if a timer exists, force delete it !!!
+            try:
+                del self.timer
+            except AttributeError as e:
+                #print(e)
+                pass
             self.image_panel_refresh()
         
         dialog.Destroy()
         
-    # ---------- Event處理 End ---------- # 
+    # ---------- Event Handler End ---------- # 
     
     def press_state(self):
         # disable others & enable logs
@@ -461,10 +476,17 @@ class PanelOne(wx.Panel):
             # draw on frame
             if self.draw_flag:
                 self.cv_draw(self.frame)
-            
+                
+            """ 
+            In windows 10, you can update the screen with self.video_panel.Refresh().
+            However, it doesn't work in ubuntu 1804.
+            So use refresh bitmap instead.
+            """
+            # refresh the bitmap
             self.bmp.CopyFromBuffer(self.frame)
+            self.bitmap.SetBitmap(self.bmp)
             
-            self.video_panel.Refresh()
+            #self.video_panel.Refresh()
             
         # ---------- slider part ---------- #
         offset = self.frame_count*100//self.total_frame
@@ -528,8 +550,9 @@ class PanelOne(wx.Panel):
             if i == self.roi_limit-1:
                 cv2.line(frame, tuple(self.points_list[i]), tuple(self.points_list[0]), color, 2)
                 
+        # refresh the bitmap
         self.bmp.CopyFromBuffer(frame)
-        self.video_panel.Refresh()
+        self.bitmap.SetBitmap(self.bmp)
         
     # ---------- dump json conditions ---------- #        
     def dump_json_conditions(self):
@@ -580,4 +603,4 @@ class PanelOne(wx.Panel):
             dlg.Destroy()
             
         return retCode
-    
+        

@@ -100,7 +100,7 @@ class TaskFrame(wx.Frame):
                 self.notebook.SendSizeEvent()
                 break
         
-    # ---------- 菜單相關 Start ---------- #
+    # ----------Menu Related Start ---------- #
     def create_menu(self):
         """
         Create the menu
@@ -139,9 +139,9 @@ class TaskFrame(wx.Frame):
     
     def on_exit(self, event):
         self.Destroy()
-    # ---------- 菜單相關 End ---------- #
+    # ---------- Menu Related End ---------- #
     
-    # ---------- 狀態欄 Start ---------- #
+    # ---------- Status Bar Start ---------- #
     def create_statusBar(self):
         """
         Create the status bar
@@ -150,9 +150,9 @@ class TaskFrame(wx.Frame):
         
     def updateStatusBar(self, msg):
         self.statusBar.SetStatusText(msg)
-    # ---------- 狀態欄 End ---------- #
+    # ---------- Status Bar End ---------- #
     
-    # ---------- Tab相關 Start ---------- #
+    # ---------- Tab Related Start ---------- #
     def PageChanged(self, event=None):
         if self.notebook.pageChanged_count > 0:
             #print(self.notebook.GetChildren())
@@ -163,7 +163,7 @@ class TaskFrame(wx.Frame):
                     
         #print(self.notebook.pageChanged_count)
         self.notebook.pageChanged_count+=1
-    # ---------- Tab相關 End ---------- #
+    # ---------- Tab Related End ---------- #
     
 def create_output_folders(paths):
     for path in paths:
@@ -176,7 +176,7 @@ def main():
     
     # init settings
     tool_title = "Coordinate Transfer Tool"
-    tool_version = "v1.1.0"
+    tool_version = "v1.2.0"
     tool_icon = "icon/logo.png"
     
     # create application

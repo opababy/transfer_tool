@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os, sys
 import shutil
+import platform
 
 
 OUTPUT_FOLDER = "dist"
@@ -14,7 +15,12 @@ def main():
 
     for src_file in SRC_FILES:
         os.system('pyinstaller -F %s' % src_file)
-        dst_file = os.path.join(OUTPUT_FOLDER, src_file.split('.')[0]+'.exe')
+	
+        if platform.system() == 'Windows':
+            dst_file = os.path.join(OUTPUT_FOLDER, src_file.split('.')[0]+'.exe')
+        elif platform.system() == 'Linux':
+            dst_file = os.path.join(OUTPUT_FOLDER, src_file.split('.')[0])
+	
         if os.path.isfile(dst_file):
             print ('%s build done\n' % dst_file)
         else: 
