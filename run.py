@@ -176,7 +176,7 @@ def main():
     
     # init settings
     tool_title = "Coordinate Transfer Tool"
-    tool_version = "v1.2.0"
+    tool_version = "v1.3.0"
     tool_icon = "icon/logo.png"
     
     # create application

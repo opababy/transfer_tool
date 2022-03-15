@@ -10,6 +10,8 @@ from pubsub import pub
 import platform
 
 from dump_json import JsonData
+import update_package
+from thread_with_return_value import ThreadWithReturnValue
 
 
 class PanelOne(wx.Panel):
@@ -96,6 +98,9 @@ class PanelOne(wx.Panel):
         self.btn_json = wx.Button(self.scrolled_panel, label="Dump json", size=(-1, 30))
         self.btn_json.Disable()
         
+        self.btn_upload = wx.Button(self.scrolled_panel, label="Upload package", size=(-1, 30))
+        self.btn_upload.Disable()
+        
         # put to boxes
         item_vbox.Add(self.btn_video_load, 0, wx.ALL, 10) # Load video
         item_vbox.Add(self.btn_image_load, 0, wx.ALL, 10) # Load image
@@ -104,6 +109,7 @@ class PanelOne(wx.Panel):
         ai_hbox.Add(ai_text, 0, wx.ALL, 10) # AI model
         ai_hbox.Add(self.ai_choice, 0, wx.ALL, 10)
         item_vbox_2.Add(self.btn_json, 0, wx.ALL, 10) # Dump json
+        item_vbox_2.Add(self.btn_upload, 0, wx.ALL, 10) # Upload package
         
         button_vbox.Add(item_vbox, 0, wx.ALL, 10)
         button_vbox.Add(roi_hbox, 0, wx.ALL, 10)
@@ -188,6 +194,8 @@ class PanelOne(wx.Panel):
         
         self.btn_json.Bind(wx.EVT_BUTTON, self.OnDumpJson)
         
+        self.btn_upload.Bind(wx.EVT_BUTTON, self.OnUploadPackage)
+        
         self.cvVideo2wx_interface()
         
     def create_image_panel(self): # after trigger "Load image" btn
@@ -203,6 +211,8 @@ class PanelOne(wx.Panel):
         self.ai_choice.Enable()
         
         self.btn_json.Bind(wx.EVT_BUTTON, self.OnDumpJson)
+        
+        self.btn_upload.Bind(wx.EVT_BUTTON, self.OnUploadPackage)
         
         self.cvImg2wx_interface()
                 
@@ -446,7 +456,10 @@ class PanelOne(wx.Panel):
     # ---------- Event Handler End ---------- # 
     
     def press_state(self):
-        # disable others & enable logs
+        # disable others
+        self.btn_json.Disable()
+        self.btn_upload.Disable()
+        
         self.btn_play.Disable()
         self.btn_pause.Disable()
         self.btn_stop.Disable()
@@ -457,6 +470,19 @@ class PanelOne(wx.Panel):
         
         # disable other tabs
         self.GetParent().EnableTab(0, False)
+        
+    def enable_state(self):
+        # enable others
+        self.btn_json.Enable()
+        self.btn_upload.Enable()
+        
+        self.btn_play.Enable()
+        self.btn_pause.Enable()
+        self.btn_stop.Enable()
+        self.menu_bar.EnableTop(pos=0, enable=True)  
+        
+        # disable other tabs
+        self.GetParent().EnableTab(0, True)
         
     # ---------- opencv to wxpython interface ---------- #
     def nextFrame(self, event=None):
@@ -512,7 +538,8 @@ class PanelOne(wx.Panel):
         self.video_panel = wx.Panel(self, wx.ID_ANY, size=self.size, style=wx.BORDER_THEME)
         self.create_video_panel()
         
-        self.btn_json.Disable()
+        self.btn_json.Disable()     
+        self.btn_upload.Disable() 
         
     def image_panel_refresh(self):
         self.video_panel.Destroy()
@@ -520,6 +547,7 @@ class PanelOne(wx.Panel):
         self.create_image_panel()
         
         self.btn_json.Disable()
+        self.btn_upload.Disable() 
         
     def cv_draw(self, frame): # already BGR -> RGB
         color_table = self.config.get_config_item("COMMON_SETTINGS", "color_table")
@@ -559,10 +587,12 @@ class PanelOne(wx.Panel):
         try:
             if self.roi_result and self.ai_result and len(self.points_list) == self.roi_limit:
                 self.btn_json.Enable()
+                self.btn_upload.Enable()
                 
         except AttributeError as e:
             #print("AttributeError !")
             self.btn_json.Disable()
+            self.btn_upload.Disable()
             
     def to_AI_model_position(self):
         ai_points_list = []
@@ -637,6 +667,27 @@ class PanelOne(wx.Panel):
         # refresh the bitmap
         self.bmp.CopyFromBuffer(frame)
         self.bitmap.SetBitmap(self.bmp)
+        
+    def OnUploadPackage(self, event=None):
+        # get ip
+        ip = self.config.get_config_item("COMMON_SETTINGS", "ip")   
+        
+        self.press_state()
+        wx.SafeYield()
+
+        t = ThreadWithReturnValue(target=update_package.update_package, args=(ip, ))
+        t.start()
+        r = t.join()
+
+        if r:
+            msg = "upload package successfully!"
+        else:
+            msg = "upload package failed! Please check ip or net..."
+            
+        self.showDialog(msg)
+        # Note! Back to the working directory...
+        os.chdir(self.cwd)
+        self.enable_state()
         
 """ opencv draws dashed lines:
     https://stackoverflow.com/questions/26690932/opencv-rectangle-with-dotted-or-dashed-lines
