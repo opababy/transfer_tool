@@ -672,7 +672,7 @@ class PanelOne(wx.Panel):
         # get ip
         ip = self.config.get_config_item("COMMON_SETTINGS", "ip")   
         
-        self.press_state()
+        #self.press_state()
         wx.SafeYield()
 
         t = ThreadWithReturnValue(target=update_package.update_package, args=(ip, ))
@@ -687,7 +687,6 @@ class PanelOne(wx.Panel):
         self.showDialog(msg)
         # Note! Back to the working directory...
         os.chdir(self.cwd)
-        self.enable_state()
         
 """ opencv draws dashed lines:
     https://stackoverflow.com/questions/26690932/opencv-rectangle-with-dotted-or-dashed-lines
