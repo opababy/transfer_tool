@@ -361,7 +361,7 @@ class PanelOne(wx.Panel):
             self.points_list.append(tuple(event.Position))
             
             self.cv_draw(frame)
-            self.video_panel.Refresh()
+            #self.video_panel.Refresh()
             
             self.dump_json_conditions()
         
@@ -603,4 +603,65 @@ class PanelOne(wx.Panel):
             dlg.Destroy()
             
         return retCode
+ # ---------- Show json helper line ---------- # 
+    def to_UI_position(self, ai_pos):
+        ui_x = int(ai_pos[0]*self.client_size[0]/self.ai_model_dimension[0])
+        ui_y = int(ai_pos[1]*self.client_size[1]/self.ai_model_dimension[1])
         
+        return (ui_x, ui_y)
+    
+    def json_line(self, json_key, frame): 
+        json_data_path = "data/event_fusion.json"
+        key_roi1 = "%s_roi1"%(json_key)
+        key_roi2 = "%s_roi2"%(json_key)
+        
+        jsonData = JsonData(json_data_path, None, None)
+        data = jsonData.json_load()
+        # print(data)
+        
+        # print(data[key_roi1])
+        # print(data[key_roi2])
+        
+        for key in [key_roi1, key_roi2]:
+            #for i in range(len(data[key_roi1])):
+            for i in range(self.roi_limit):
+                #print(data[key]["p%d"%i])
+                if i > 0:
+                    drawDashLine(frame, self.to_UI_position((data[key]["p%d"%(i-1)]["x"], data[key]["p%d"%(i-1)]["y"])), \
+                                        self.to_UI_position((data[key]["p%d"%(i)]["x"], data[key]["p%d"%(i)]["y"])))
+                    
+                if i == self.roi_limit-1:
+                    drawDashLine(frame, self.to_UI_position((data[key]["p%d"%(i)]["x"], data[key]["p%d"%(i)]["y"])), \
+                                        self.to_UI_position((data[key]["p%d"%(0)]["x"], data[key]["p%d"%(0)]["y"])))
+                                        
+        # refresh the bitmap
+        self.bmp.CopyFromBuffer(frame)
+        self.bitmap.SetBitmap(self.bmp)
+        
+""" opencv draws dashed lines:
+    https://stackoverflow.com/questions/26690932/opencv-rectangle-with-dotted-or-dashed-lines
+    example: drawDashLine(frame, (218, 188), (338, 217))
+"""
+def drawDashLine(img, pt1, pt2, color=(0, 0, 0), thickness=2, style="dotted", gap=10):
+    dist =((pt1[0]-pt2[0])**2+(pt1[1]-pt2[1])**2)**.5
+    pts= []
+    for i in np.arange(0, dist, gap):
+        r = i/dist
+        x = int((pt1[0]*(1-r)+pt2[0]*r)+.5)
+        y = int((pt1[1]*(1-r)+pt2[1]*r)+.5)
+        p = (x, y)
+        pts.append(p)
+
+    if style == "dotted":
+        for p in pts:
+            cv2.circle(img, p, thickness, color, -1)
+    else:
+        s = pts[0]
+        e = pts[0]
+        i = 0
+        for p in pts:
+            s = e
+            e = p
+            if i%2 == 1:
+                cv2.line(img, s, e, color, thickness)
+            i += 1

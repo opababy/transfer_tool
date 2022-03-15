@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import json
 import os
 #import hashlib
@@ -29,6 +30,8 @@ class JsonData():
         with open(self.data_path, newline='') as jsonfile:
             self.data = json.load(jsonfile)
             #print(self.data)
+            
+        return self.data
             
     def json_data_process(self):
         #print(self.data)
