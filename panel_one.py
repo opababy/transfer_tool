@@ -2,16 +2,32 @@
 import os, sys
 import time, datetime
 import cv2
+import numpy as np
 import wx
-import wx.media
 import wx.lib.agw.aui as aui
 import wx.lib.scrolledpanel as scrolled
 from pubsub import pub
 import platform
 
 from dump_json import JsonData
-import update_package
-from thread_with_return_value import ThreadWithReturnValue
+from table import *
+#import update_package
+#from thread_with_return_value import ThreadWithReturnValue
+from work_thread import WorkThread
+
+"""
+https://www.twblogs.net/a/5b9063272b717767221989a8
+"""
+class ConditionEvent(wx.PyCommandEvent):         
+    def __init__(self, evtType, id):                 
+        super(wx.PyCommandEvent, self).__init__(evtType, id)
+        self.eventArgs = ""
+        
+    def GetEventArgs(self): 
+        return self.eventArgs 
+
+    def SetEventArgs(self, args): 
+        self.eventArgs = args 
 
 
 class PanelOne(wx.Panel):
@@ -35,6 +51,15 @@ class PanelOne(wx.Panel):
         self.init_flag = 0
         self.frame_count = 0
         
+        # AI conditions
+        self.ai_result = None
+        self.roi_result = None
+        
+        # create condition event handler
+        self.myEVT_CONDITION = wx.NewEventType()
+        EVT_CONDITION = wx.PyEventBinder(self.myEVT_CONDITION, 1)
+        self.Bind(EVT_CONDITION, self.OnConditionHandler)
+        
         # draw on opencv
         self.draw_flag = 0
         self.points_list = []
@@ -48,6 +73,11 @@ class PanelOne(wx.Panel):
         # set background color
         #colors = ["white", "red", "blue", "gray", "yellow", "green"]
         #self.SetBackgroundColour(colors[0])
+        
+        # create pubsub receiver
+        pub.subscribe(self.showDialog, "showDialog")
+        pub.subscribe(self.changeDirectory, "changeDirectory")
+        pub.subscribe(self.enable_state, "enable_state")
         
         self.create_init_panel()
         
@@ -76,7 +106,8 @@ class PanelOne(wx.Panel):
         # define the buttons
         self.btn_video_load = wx.Button(self.scrolled_panel, label="Load video", size=(-1, 30))
         self.btn_video_load.Bind(wx.EVT_BUTTON, self.OnLoadVideoFile)
-        self.btn_video_load.Enable()
+        #self.btn_video_load.Enable()
+        self.btn_video_load.Disable()
         
         self.btn_image_load = wx.Button(self.scrolled_panel, label="Load image", size=(-1, 30))
         self.btn_image_load.Bind(wx.EVT_BUTTON, self.OnLoadImageFile)
@@ -90,11 +121,16 @@ class PanelOne(wx.Panel):
         
         # define the AI choice box
         ai_text = wx.StaticText(self.scrolled_panel, label="AI model: ", size=(-1, 30))
-        ai_list = ["BSD", "BSIS", "BSD_BSIS", "FCW"]
+        ai_list = ["BSD-L", "BSD-R", "BSIS", "FCW"]
         self.ai_choice = wx.Choice(self.scrolled_panel, -1, choices = ai_list, style = wx.CB_SORT)
         self.ai_choice.Disable()
         
         # define the buttons
+        self.btn_back = wx.Button(self.scrolled_panel, label="Back", size=(-1, 30))
+        pic = wx.Bitmap("icon/back.png")
+        self.btn_back.SetBitmap(pic)
+        self.btn_back.Disable()
+        
         self.btn_json = wx.Button(self.scrolled_panel, label="Dump json", size=(-1, 30))
         self.btn_json.Disable()
         
@@ -108,6 +144,7 @@ class PanelOne(wx.Panel):
         roi_hbox.Add(self.roi_choice, 0, wx.ALL, 10)
         ai_hbox.Add(ai_text, 0, wx.ALL, 10) # AI model
         ai_hbox.Add(self.ai_choice, 0, wx.ALL, 10)
+        item_vbox_2.Add(self.btn_back, 0, wx.ALL, 10) # Back
         item_vbox_2.Add(self.btn_json, 0, wx.ALL, 10) # Dump json
         item_vbox_2.Add(self.btn_upload, 0, wx.ALL, 10) # Upload package
         
@@ -192,10 +229,6 @@ class PanelOne(wx.Panel):
         self.ai_choice.Bind(wx.EVT_CHOICE, self.onAiChoice)
         self.ai_choice.Enable()
         
-        self.btn_json.Bind(wx.EVT_BUTTON, self.OnDumpJson)
-        
-        self.btn_upload.Bind(wx.EVT_BUTTON, self.OnUploadPackage)
-        
         self.cvVideo2wx_interface()
         
     def create_image_panel(self): # after trigger "Load image" btn
@@ -209,10 +242,6 @@ class PanelOne(wx.Panel):
         
         self.ai_choice.Bind(wx.EVT_CHOICE, self.onAiChoice)
         self.ai_choice.Enable()
-        
-        self.btn_json.Bind(wx.EVT_BUTTON, self.OnDumpJson)
-        
-        self.btn_upload.Bind(wx.EVT_BUTTON, self.OnUploadPackage)
         
         self.cvImg2wx_interface()
                 
@@ -244,7 +273,7 @@ class PanelOne(wx.Panel):
         self.bmp = wx.Bitmap.FromBuffer(self.client_size[0], self.client_size[1], self.frame)
         self.bitmap = wx.StaticBitmap(self.video_panel, bitmap=self.bmp)
         
-        # set a timer to handle this event
+        # set a timer to handler this event
         self.timer = wx.Timer(self)
         #self.timer.Start(1000./self.fps)
         self.timer.Stop()
@@ -280,9 +309,6 @@ class PanelOne(wx.Panel):
         
         # avoid flicker (Note! Do not refresh the panel, refresh the bitmap !)
         self.bitmap.Bind(wx.EVT_PAINT, self.OnPaint)
-        
-        # bind to mouse clicked event
-        self.bitmap.Bind(wx.EVT_LEFT_DOWN, lambda event: self.OnMouseClicked(self.cvImg, event))
         
         # avoid layout changes after zooming
         self.Bind(wx.EVT_SIZE, self.OnSize)
@@ -363,6 +389,29 @@ class PanelOne(wx.Panel):
         #print("zooming ...")
         self.Refresh()
         
+    """
+    # ---------- Condition Handler ----------
+    """ 
+    def OnConditionHandler(self, event=None):
+        #print("Enter OnConditionHandler!!!")
+        currentFrame = self.cvImg
+        backupFrame = currentFrame.copy()
+        
+        if self.roi_result and self.ai_result:        
+            # draw dashed lines
+            json_key = "%s_%s"%(TABLE[self.ai_result], self.roi_result)
+            self.json_line(json_key.lower(), backupFrame)
+        
+            # bind to mouse clicked event
+            self.bitmap.Bind(wx.EVT_LEFT_DOWN, lambda event: self.OnMouseClicked(currentFrame, event))
+            
+        if len(self.points_list) == self.roi_limit:
+            self.btn_json.Bind(wx.EVT_BUTTON, self.OnDumpJson)
+            self.btn_json.Enable()
+            
+            self.btn_upload.Bind(wx.EVT_BUTTON, self.OnUploadPackage)
+            self.btn_upload.Enable()
+            
     def OnMouseClicked(self, frame, event=None):
         #print(event.Position) # data type: wx.Point(X, Y)
         if len(self.points_list) < self.roi_limit:
@@ -373,19 +422,28 @@ class PanelOne(wx.Panel):
             self.cv_draw(frame)
             #self.video_panel.Refresh()
             
-            self.dump_json_conditions()
+        # enter event handler
+        evt = ConditionEvent(self.myEVT_CONDITION, event.GetId())
+        evt.SetEventArgs("OnMouseClicked")
+        self.GetEventHandler().ProcessEvent(evt)
         
     def onRoiChoice(self, event=None):
         self.roi_result = self.roi_choice.GetStringSelection()
         # print(self.roi_result)
         
-        self.dump_json_conditions()
+        # enter event handler
+        evt = ConditionEvent(self.myEVT_CONDITION, event.GetId())
+        evt.SetEventArgs("onRoiChoice")
+        self.GetEventHandler().ProcessEvent(evt)
         
     def onAiChoice(self, event=None):
         self.ai_result = self.ai_choice.GetStringSelection()
         # print(self.ai_result)
         
-        self.dump_json_conditions()
+        # enter event handler
+        evt = ConditionEvent(self.myEVT_CONDITION, event.GetId())
+        evt.SetEventArgs("onAiChoice")
+        self.GetEventHandler().ProcessEvent(evt)
         
     def OnDumpJson(self, event=None):
         #print("Dump json ...")
@@ -395,7 +453,7 @@ class PanelOne(wx.Panel):
         # print(self.ai_result)
         # print(self.roi_result)
         
-        json_key = "%s_%s"%(self.ai_result, self.roi_result)
+        json_key = "%s_%s"%(TABLE[self.ai_result], self.roi_result)
         #print(json_key.lower())
         
         # check json file exist
@@ -418,6 +476,11 @@ class PanelOne(wx.Panel):
                 msg = "json dump failed! Please try again..."
                 
             self.showDialog(msg)
+            
+            # enter event handler
+            evt = ConditionEvent(self.myEVT_CONDITION, event.GetId())
+            evt.SetEventArgs("OnDumpJson")
+            self.GetEventHandler().ProcessEvent(evt)
             
     def OnLoadImageFile(self, event=None):
         if platform.system() == "Windows":
@@ -457,6 +520,8 @@ class PanelOne(wx.Panel):
     
     def press_state(self):
         # disable others
+        self.btn_video_load.Disable()
+        self.btn_image_load.Disable()
         self.btn_json.Disable()
         self.btn_upload.Disable()
         
@@ -473,6 +538,8 @@ class PanelOne(wx.Panel):
         
     def enable_state(self):
         # enable others
+        self.btn_video_load.Disable()
+        self.btn_image_load.Enable()
         self.btn_json.Enable()
         self.btn_upload.Enable()
         
@@ -581,18 +648,6 @@ class PanelOne(wx.Panel):
         # refresh the bitmap
         self.bmp.CopyFromBuffer(frame)
         self.bitmap.SetBitmap(self.bmp)
-        
-    # ---------- dump json conditions ---------- #        
-    def dump_json_conditions(self):
-        try:
-            if self.roi_result and self.ai_result and len(self.points_list) == self.roi_limit:
-                self.btn_json.Enable()
-                self.btn_upload.Enable()
-                
-        except AttributeError as e:
-            #print("AttributeError !")
-            self.btn_json.Disable()
-            self.btn_upload.Disable()
             
     def to_AI_model_position(self):
         ai_points_list = []
@@ -606,7 +661,6 @@ class PanelOne(wx.Panel):
             
         #print(ai_points_list)
         return ai_points_list
-        
         
     # ---------- show dialog ---------- #  
     def showDialog(self, msg, dlg_type="OK"):
@@ -642,27 +696,22 @@ class PanelOne(wx.Panel):
     
     def json_line(self, json_key, frame): 
         json_data_path = "data/event_fusion.json"
-        key_roi1 = "%s_roi1"%(json_key)
-        key_roi2 = "%s_roi2"%(json_key)
         
         jsonData = JsonData(json_data_path, None, None)
         data = jsonData.json_load()
         # print(data)
         
-        # print(data[key_roi1])
-        # print(data[key_roi2])
+        # print(data[json_key])
         
-        for key in [key_roi1, key_roi2]:
-            #for i in range(len(data[key_roi1])):
-            for i in range(self.roi_limit):
-                #print(data[key]["p%d"%i])
-                if i > 0:
-                    drawDashLine(frame, self.to_UI_position((data[key]["p%d"%(i-1)]["x"], data[key]["p%d"%(i-1)]["y"])), \
-                                        self.to_UI_position((data[key]["p%d"%(i)]["x"], data[key]["p%d"%(i)]["y"])))
-                    
-                if i == self.roi_limit-1:
-                    drawDashLine(frame, self.to_UI_position((data[key]["p%d"%(i)]["x"], data[key]["p%d"%(i)]["y"])), \
-                                        self.to_UI_position((data[key]["p%d"%(0)]["x"], data[key]["p%d"%(0)]["y"])))
+        for i in range(self.roi_limit):
+            #print(data[json_key]["p%d"%i])
+            if i > 0:
+                drawDashLine(frame, self.to_UI_position((data[json_key]["p%d"%(i-1)]["x"], data[json_key]["p%d"%(i-1)]["y"])), \
+                                    self.to_UI_position((data[json_key]["p%d"%(i)]["x"], data[json_key]["p%d"%(i)]["y"])))
+                
+            if i == self.roi_limit-1:
+                drawDashLine(frame, self.to_UI_position((data[json_key]["p%d"%(i)]["x"], data[json_key]["p%d"%(i)]["y"])), \
+                                    self.to_UI_position((data[json_key]["p%d"%(0)]["x"], data[json_key]["p%d"%(0)]["y"])))
                                         
         # refresh the bitmap
         self.bmp.CopyFromBuffer(frame)
@@ -672,20 +721,26 @@ class PanelOne(wx.Panel):
         # get ip
         ip = self.config.get_config_item("COMMON_SETTINGS", "ip")   
         
-        #self.press_state()
+        self.press_state()
         wx.SafeYield()
 
-        t = ThreadWithReturnValue(target=update_package.update_package, args=(ip, ))
-        t.start()
-        r = t.join()
+        """ UI hang... """
+        # t = ThreadWithReturnValue(target=update_package.update_package, args=(ip, ))
+        # t.start()
+        # r = t.join()
 
-        if r:
-            msg = "upload package successfully!"
-        else:
-            msg = "upload package failed! Please check ip or net..."
+        # if r:
+            # msg = "upload package successfully!"
+        # else:
+            # msg = "upload package failed! Please check ip or net..."
             
-        self.showDialog(msg)
-        # Note! Back to the working directory...
+        # self.showDialog(msg)
+        # # Note! Back to the working directory...
+        # self.changeDirectory()
+        
+        WorkThread(ip)
+        
+    def changeDirectory(self):
         os.chdir(self.cwd)
         
 """ opencv draws dashed lines:

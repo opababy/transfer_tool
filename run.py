@@ -89,6 +89,9 @@ class TaskFrame(wx.Frame):
         sizer.Add(self.notebook, border=5, proportion=1, flag=wx.ALL|wx.EXPAND)
         self.panel.SetSizer(sizer)
    
+        # create pubsub receiver
+        pub.subscribe(self.updateStatusBar, "updateStatusBar")
+   
         # remove black rectangular issue !!!
         self.Layout()
 
@@ -176,7 +179,7 @@ def main():
     
     # init settings
     tool_title = "Coordinate Transfer Tool"
-    tool_version = "v1.3.0"
+    tool_version = "v1.4.0"
     tool_icon = "icon/logo.png"
     
     # create application
