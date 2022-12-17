@@ -47,7 +47,7 @@ For questions related to the installation of wxPython, please refer to the offic
 Just the test code.
 
 ### Effect
-![preview]([https://github.com/opababy/transfer_tool/github_data/preview.gif](https://github.com/opababy/transfer_tool/blob/main/github_data/preview.gif) "preview")
+![preview](https://github.com/opababy/transfer_tool/github_data/preview.gif](https://github.com/opababy/transfer_tool/blob/main/github_data/preview.gif) "preview")
 
 ### To do
 1. Update video mode.
