@@ -127,7 +127,9 @@ class PanelOne(wx.Panel):
         
         # define the buttons
         self.btn_back = wx.Button(self.scrolled_panel, label="Back", size=(-1, 30))
-        pic = wx.Bitmap("icon/back.png")
+        img = wx.Image("icon/back.png", wx.BITMAP_TYPE_ANY)
+        img = img.Scale(20, 20, wx.IMAGE_QUALITY_HIGH)
+        pic = wx.Bitmap(img)
         self.btn_back.SetBitmap(pic)
         self.btn_back.Disable()
         
